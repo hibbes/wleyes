@@ -5,6 +5,7 @@ project('wleyes', 'c',
 
 cc = meson.get_compiler('c')
 math_lib = cc.find_library('m')
+rt_lib = cc.find_library('rt', required: false)
 
 wayland_client = dependency('wayland-client')
 wayland_protos = dependency('wayland-protocols')
@@ -50,6 +51,6 @@ executable('wleyes',
   layer_shell_code,
   xdg_shell_client_h,
   xdg_shell_code,
-  dependencies: [wayland_client, cairo, math_lib],
+  dependencies: [wayland_client, cairo, math_lib, rt_lib],
   install: true,
 )

@@ -3,6 +3,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/mman.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 #include "wayland.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
@@ -331,7 +334,80 @@ bool wleyes_init(struct wleyes_state *state) {
     return true;
 }
 
+/* ── SHM buffer management ────────────────────────────────────────────────── */
+
+static int create_shm_file(off_t size) {
+    int fd = shm_open("/wleyes-shm", O_RDWR | O_CREAT | O_EXCL, 0600);
+    if (fd < 0) {
+        /* Name already exists — unlink and retry */
+        shm_unlink("/wleyes-shm");
+        fd = shm_open("/wleyes-shm", O_RDWR | O_CREAT | O_EXCL, 0600);
+        if (fd < 0) {
+            perror("shm_open");
+            return -1;
+        }
+    }
+    /* Unlink immediately; the fd keeps the object alive until closed */
+    shm_unlink("/wleyes-shm");
+
+    if (ftruncate(fd, size) < 0) {
+        perror("ftruncate");
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+bool wleyes_create_buffers(struct wleyes_state *state) {
+    int width    = state->config.width;
+    int height   = state->config.height;
+    int stride   = width * 4;
+    int buf_size = stride * height;
+    int total    = buf_size * 2;
+
+    state->buffer_size = buf_size;
+
+    int fd = create_shm_file((off_t)total);
+    if (fd < 0) {
+        fprintf(stderr, "wleyes: failed to create SHM file\n");
+        return false;
+    }
+
+    void *data = mmap(NULL, (size_t)total, PROT_READ | PROT_WRITE,
+                      MAP_SHARED, fd, 0);
+    if (data == MAP_FAILED) {
+        perror("mmap");
+        close(fd);
+        return false;
+    }
+
+    struct wl_shm_pool *pool = wl_shm_create_pool(state->shm, fd, total);
+
+    state->buffers[0] = wl_shm_pool_create_buffer(pool, 0,
+        width, height, stride, WL_SHM_FORMAT_ARGB8888);
+    state->buffers[1] = wl_shm_pool_create_buffer(pool, buf_size,
+        width, height, stride, WL_SHM_FORMAT_ARGB8888);
+
+    wl_shm_pool_destroy(pool);
+    close(fd);
+
+    state->buffer_data[0] = data;
+    state->buffer_data[1] = (char *)data + buf_size;
+    state->current_buffer = 0;
+
+    return true;
+}
+
 void wleyes_destroy(struct wleyes_state *state) {
+    /* Free SHM buffers */
+    if (state->buffers[0]) { wl_buffer_destroy(state->buffers[0]); state->buffers[0] = NULL; }
+    if (state->buffers[1]) { wl_buffer_destroy(state->buffers[1]); state->buffers[1] = NULL; }
+    if (state->buffer_data[0]) {
+        munmap(state->buffer_data[0], (size_t)state->buffer_size * 2);
+        state->buffer_data[0] = NULL;
+        state->buffer_data[1] = NULL;
+    }
+
     /* Destroy in reverse bind order */
     if (state->eyes_layer)     { zwlr_layer_surface_v1_destroy(state->eyes_layer);    state->eyes_layer    = NULL; }
     if (state->eyes_surface)   { wl_surface_destroy(state->eyes_surface);             state->eyes_surface  = NULL; }

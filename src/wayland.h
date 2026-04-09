@@ -47,6 +47,12 @@ struct wleyes_state {
     bool   cursor_valid;
     bool   needs_redraw;
 
+    /* SHM double-buffer */
+    struct wl_buffer *buffers[2];
+    void             *buffer_data[2];
+    int               current_buffer;
+    int               buffer_size;
+
     /* Config */
     struct wleyes_config config;
 
@@ -57,5 +63,6 @@ struct wleyes_state {
 bool wleyes_init(struct wleyes_state *state);
 void wleyes_destroy(struct wleyes_state *state);
 bool wleyes_setup_surfaces(struct wleyes_state *state);
+bool wleyes_create_buffers(struct wleyes_state *state);
 
 #endif /* WLEYES_WAYLAND_H */

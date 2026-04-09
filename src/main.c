@@ -129,6 +129,13 @@ int main(int argc, char *argv[]) {
     wl_display_roundtrip(state.display);
 
     printf("Screen: %dx%d\n", state.screen_width, state.screen_height);
+
+    if (!wleyes_create_buffers(&state)) {
+        fprintf(stderr, "Failed to create SHM buffers.\n");
+        wleyes_destroy(&state);
+        return EXIT_FAILURE;
+    }
+
     printf("Tracking pointer. Press Ctrl+C to quit.\n");
 
     while (state.running && wl_display_dispatch(state.display) != -1) {
