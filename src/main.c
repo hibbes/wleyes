@@ -5,6 +5,7 @@
 #include <signal.h>
 
 #include "wayland.h"
+#include "render.h"
 
 #define VERSION "0.1.0"
 
@@ -140,8 +141,15 @@ int main(int argc, char *argv[]) {
 
     while (state.running && wl_display_dispatch(state.display) != -1) {
         if (state.needs_redraw && state.cursor_valid) {
-            printf("\rCursor: %.0f, %.0f   ", state.cursor_x, state.cursor_y);
-            fflush(stdout);
+            wleyes_render(&state);
+
+            wl_surface_attach(state.eyes_surface,
+                state.buffers[state.current_buffer], 0, 0);
+            wl_surface_damage_buffer(state.eyes_surface, 0, 0,
+                state.config.width, state.config.height);
+            wl_surface_commit(state.eyes_surface);
+
+            state.current_buffer = 1 - state.current_buffer;
             state.needs_redraw = false;
         }
     }
