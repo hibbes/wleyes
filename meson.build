@@ -10,6 +10,8 @@ rt_lib = cc.find_library('rt', required: false)
 wayland_client = dependency('wayland-client')
 wayland_protos = dependency('wayland-protocols')
 cairo = dependency('cairo')
+libinput = dependency('libinput')
+libudev = dependency('libudev')
 
 wayland_scanner = find_program('wayland-scanner')
 
@@ -51,6 +53,6 @@ executable('wleyes',
   layer_shell_code,
   xdg_shell_client_h,
   xdg_shell_code,
-  dependencies: [wayland_client, cairo, math_lib, rt_lib],
+  dependencies: [wayland_client, cairo, math_lib, rt_lib, libinput, libudev],
   install: true,
 )

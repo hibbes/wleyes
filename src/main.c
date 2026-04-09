@@ -1,13 +1,17 @@
-// src/main.c
+#define _POSIX_C_SOURCE 199309L
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
+#include <poll.h>
+#include <time.h>
+#include <wayland-client.h>
 
 #include "wayland.h"
 #include "render.h"
 
 #define VERSION "0.1.0"
+#define FRAME_INTERVAL_MS 32
 
 static struct wleyes_state *g_state = NULL;
 
@@ -20,25 +24,26 @@ static void print_help(const char *prog) {
     printf(
         "Usage: %s [OPTIONS]\n"
         "\n"
+        "Wayland-native xeyes — two eyes that follow your cursor.\n"
+        "\n"
         "Options:\n"
-        "  --anchor <pos>      Anchor position: top-left|top-right|bottom-left|bottom-right\n"
-        "                      (default: top-right)\n"
-        "  --margin <x>,<y>    Margin from anchor corner (default: 200,4)\n"
-        "  --size <w>x<h>      Eyes surface size (default: 48x24)\n"
-        "  --output <name>     Output/monitor name (default: first available)\n"
-        "  -h, --help          Show this help and exit\n"
-        "  -v, --version       Show version and exit\n",
+        "  --anchor <pos>      top-left|top-right|bottom-left|bottom-right (default: top-right)\n"
+        "  --margin <x>,<y>    Offset from anchor in pixels (default: 200,4)\n"
+        "  --size <w>x<h>      Widget size in pixels (default: 48x24)\n"
+        "  --output <name>     Target monitor (default: first available)\n"
+        "  -h, --help          Show this help\n"
+        "  -v, --version       Show version\n",
         prog
     );
 }
 
 static int parse_anchor(const char *s) {
-    if (strcmp(s, "top-left")     == 0) return ANCHOR_TOP_LEFT;
-    if (strcmp(s, "top-right")    == 0) return ANCHOR_TOP_RIGHT;
-    if (strcmp(s, "bottom-left")  == 0) return ANCHOR_BOTTOM_LEFT;
+    if (strcmp(s, "top-left") == 0) return ANCHOR_TOP_LEFT;
+    if (strcmp(s, "top-right") == 0) return ANCHOR_TOP_RIGHT;
+    if (strcmp(s, "bottom-left") == 0) return ANCHOR_BOTTOM_LEFT;
     if (strcmp(s, "bottom-right") == 0) return ANCHOR_BOTTOM_RIGHT;
-    fprintf(stderr, "Unknown anchor value: %s\n", s);
-    exit(EXIT_FAILURE);
+    fprintf(stderr, "Invalid anchor: %s\n", s);
+    exit(1);
 }
 
 static struct wleyes_config parse_args(int argc, char *argv[]) {
@@ -54,108 +59,121 @@ static struct wleyes_config parse_args(int argc, char *argv[]) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             print_help(argv[0]);
-            exit(EXIT_SUCCESS);
+            exit(0);
         } else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
             printf("wleyes " VERSION "\n");
-            exit(EXIT_SUCCESS);
-        } else if (strcmp(argv[i], "--anchor") == 0) {
-            if (++i >= argc) { fprintf(stderr, "--anchor requires an argument\n"); exit(EXIT_FAILURE); }
-            cfg.anchor = parse_anchor(argv[i]);
-        } else if (strcmp(argv[i], "--margin") == 0) {
-            if (++i >= argc) { fprintf(stderr, "--margin requires an argument\n"); exit(EXIT_FAILURE); }
-            if (sscanf(argv[i], "%d,%d", &cfg.margin_x, &cfg.margin_y) != 2) {
-                fprintf(stderr, "--margin expects format x,y (e.g. 200,4)\n");
-                exit(EXIT_FAILURE);
+            exit(0);
+        } else if (strcmp(argv[i], "--anchor") == 0 && i + 1 < argc) {
+            cfg.anchor = parse_anchor(argv[++i]);
+        } else if (strcmp(argv[i], "--margin") == 0 && i + 1 < argc) {
+            if (sscanf(argv[++i], "%d,%d", &cfg.margin_x, &cfg.margin_y) != 2) {
+                fprintf(stderr, "Invalid margin format, expected: x,y\n");
+                exit(1);
             }
-        } else if (strcmp(argv[i], "--size") == 0) {
-            if (++i >= argc) { fprintf(stderr, "--size requires an argument\n"); exit(EXIT_FAILURE); }
-            if (sscanf(argv[i], "%dx%d", &cfg.width, &cfg.height) != 2) {
-                fprintf(stderr, "--size expects format WxH (e.g. 48x24)\n");
-                exit(EXIT_FAILURE);
+        } else if (strcmp(argv[i], "--size") == 0 && i + 1 < argc) {
+            if (sscanf(argv[++i], "%dx%d", &cfg.width, &cfg.height) != 2) {
+                fprintf(stderr, "Invalid size format, expected: WxH\n");
+                exit(1);
             }
-        } else if (strcmp(argv[i], "--output") == 0) {
-            if (++i >= argc) { fprintf(stderr, "--output requires an argument\n"); exit(EXIT_FAILURE); }
-            cfg.output_name = argv[i];
+        } else if (strcmp(argv[i], "--output") == 0 && i + 1 < argc) {
+            cfg.output_name = argv[++i];
         } else {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             print_help(argv[0]);
-            exit(EXIT_FAILURE);
+            exit(1);
         }
     }
-
     return cfg;
 }
 
-static const char *anchor_name(int anchor) {
-    switch (anchor) {
-        case ANCHOR_TOP_LEFT:     return "top-left";
-        case ANCHOR_TOP_RIGHT:    return "top-right";
-        case ANCHOR_BOTTOM_LEFT:  return "bottom-left";
-        case ANCHOR_BOTTOM_RIGHT: return "bottom-right";
-        default:                  return "unknown";
-    }
+static long time_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1000L + ts.tv_nsec / 1000000L;
 }
 
 int main(int argc, char *argv[]) {
-    struct wleyes_config cfg = parse_args(argc, argv);
-
-    printf("Config:\n");
-    printf("  anchor:  %s\n",    anchor_name(cfg.anchor));
-    printf("  margin:  %d,%d\n", cfg.margin_x, cfg.margin_y);
-    printf("  size:    %dx%d\n", cfg.width, cfg.height);
-    printf("  output:  %s\n",    cfg.output_name ? cfg.output_name : "(first available)");
-
     struct wleyes_state state = {0};
-    state.config = cfg;
+    state.config = parse_args(argc, argv);
 
     g_state = &state;
     signal(SIGINT,  handle_signal);
     signal(SIGTERM, handle_signal);
 
-    if (!wleyes_init(&state)) {
-        fprintf(stderr, "Failed to connect to Wayland.\n");
-        return EXIT_FAILURE;
-    }
+    if (!wleyes_init(&state)) return 1;
 
-    printf("Connected to Wayland. Layer shell: %s\n",
-           state.layer_shell ? "yes" : "no");
-
-    if (!wleyes_setup_surfaces(&state)) {
-        fprintf(stderr, "Failed to set up surfaces.\n");
+    if (!wleyes_setup_surface(&state)) {
+        fprintf(stderr, "wleyes: failed to create surface\n");
         wleyes_destroy(&state);
-        return EXIT_FAILURE;
+        return 1;
     }
-
-    /* Process configure events from compositor */
-    wl_display_roundtrip(state.display);
-
-    printf("Screen: %dx%d\n", state.screen_width, state.screen_height);
 
     if (!wleyes_create_buffers(&state)) {
-        fprintf(stderr, "Failed to create SHM buffers.\n");
+        fprintf(stderr, "wleyes: failed to create buffers\n");
         wleyes_destroy(&state);
-        return EXIT_FAILURE;
+        return 1;
     }
 
-    printf("Tracking pointer. Press Ctrl+C to quit.\n");
+    if (!wleyes_open_libinput(&state)) {
+        fprintf(stderr, "wleyes: failed to open libinput (need input group?)\n");
+        wleyes_destroy(&state);
+        return 1;
+    }
 
-    while (state.running && wl_display_dispatch(state.display) != -1) {
-        if (state.needs_redraw && state.cursor_valid) {
+    /* Fullscreen calibration surface — catches first mouse movement */
+    state.calibrated = false;
+    state.cursor_x = state.eyes_screen_x + state.config.width / 2.0;
+    state.cursor_y = state.eyes_screen_y + state.config.height / 2.0;
+    wleyes_setup_calibration_surface(&state);
+
+    /* Initial render (pupils centered — cursor is at eye center) */
+    wleyes_render(&state);
+    wl_surface_attach(state.eyes_surface,
+        state.buffers[state.current_buffer], 0, 0);
+    wl_surface_damage_buffer(state.eyes_surface, 0, 0,
+        state.config.width, state.config.height);
+    wl_surface_commit(state.eyes_surface);
+    state.current_buffer = 1 - state.current_buffer;
+
+    int wl_fd = wl_display_get_fd(state.display);
+    struct pollfd fds[2] = {
+        { .fd = wl_fd,        .events = POLLIN },
+        { .fd = state.li_fd,  .events = POLLIN },
+    };
+
+    long last_render = time_ms();
+
+    while (state.running) {
+        wl_display_flush(state.display);
+        poll(fds, 2, 5);
+
+        wleyes_process_libinput(&state);
+
+        if (fds[0].revents & POLLIN) {
+            if (wl_display_dispatch(state.display) < 0) break;
+        } else {
+            wl_display_dispatch_pending(state.display);
+        }
+
+        /* Calibration done → destroy fullscreen surface, clicks pass through again */
+        if (state.calibrated && state.cal_surface) {
+            wleyes_destroy_calibration_surface(&state);
+        }
+
+        long now = time_ms();
+        if (state.needs_redraw && (now - last_render) >= FRAME_INTERVAL_MS) {
             wleyes_render(&state);
-
             wl_surface_attach(state.eyes_surface,
                 state.buffers[state.current_buffer], 0, 0);
             wl_surface_damage_buffer(state.eyes_surface, 0, 0,
                 state.config.width, state.config.height);
             wl_surface_commit(state.eyes_surface);
-
             state.current_buffer = 1 - state.current_buffer;
             state.needs_redraw = false;
+            last_render = now;
         }
     }
 
-    printf("\nShutting down.\n");
-
     wleyes_destroy(&state);
-    return EXIT_SUCCESS;
+    return 0;
 }
