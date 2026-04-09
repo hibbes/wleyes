@@ -56,5 +56,6 @@ struct wleyes_state {
 
 bool wleyes_init(struct wleyes_state *state);
 void wleyes_destroy(struct wleyes_state *state);
+bool wleyes_setup_surfaces(struct wleyes_state *state);
 
 #endif /* WLEYES_WAYLAND_H */

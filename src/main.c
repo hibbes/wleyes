@@ -107,6 +107,17 @@ int main(int argc, char *argv[]) {
     printf("Connected to Wayland. Layer shell: %s\n",
            state.layer_shell ? "yes" : "no");
 
+    if (!wleyes_setup_surfaces(&state)) {
+        fprintf(stderr, "Failed to set up surfaces.\n");
+        wleyes_destroy(&state);
+        return EXIT_FAILURE;
+    }
+
+    /* Process configure events from compositor */
+    wl_display_roundtrip(state.display);
+
+    printf("Screen: %dx%d\n", state.screen_width, state.screen_height);
+
     wleyes_destroy(&state);
     return EXIT_SUCCESS;
 }
