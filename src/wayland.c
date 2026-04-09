@@ -85,6 +85,68 @@ static const struct zwlr_layer_surface_v1_listener eyes_layer_listener = {
     .closed    = eyes_layer_closed,
 };
 
+/* ── pointer listener ─────────────────────────────────────────────────────── */
+
+static void pointer_enter(void *data, struct wl_pointer *pointer,
+                           uint32_t serial, struct wl_surface *surface,
+                           wl_fixed_t sx, wl_fixed_t sy)
+{
+    (void)pointer;
+    (void)serial;
+    struct wleyes_state *state = data;
+    if (surface == state->tracker_surface) {
+        state->cursor_x     = wl_fixed_to_double(sx);
+        state->cursor_y     = wl_fixed_to_double(sy);
+        state->cursor_valid = true;
+    }
+}
+
+static void pointer_leave(void *data, struct wl_pointer *pointer,
+                           uint32_t serial, struct wl_surface *surface)
+{
+    (void)pointer;
+    (void)serial;
+    struct wleyes_state *state = data;
+    if (surface == state->tracker_surface) {
+        state->cursor_valid = false;
+    }
+}
+
+static void pointer_motion(void *data, struct wl_pointer *pointer,
+                            uint32_t time, wl_fixed_t sx, wl_fixed_t sy)
+{
+    (void)pointer;
+    (void)time;
+    struct wleyes_state *state = data;
+    if (state->cursor_valid) {
+        state->cursor_x      = wl_fixed_to_double(sx);
+        state->cursor_y      = wl_fixed_to_double(sy);
+        state->needs_redraw  = true;
+    }
+}
+
+static void pointer_button(void *data, struct wl_pointer *pointer,
+                            uint32_t serial, uint32_t time,
+                            uint32_t button, uint32_t button_state)
+{
+    (void)data; (void)pointer; (void)serial;
+    (void)time; (void)button; (void)button_state;
+}
+
+static void pointer_axis(void *data, struct wl_pointer *pointer,
+                          uint32_t time, uint32_t axis, wl_fixed_t value)
+{
+    (void)data; (void)pointer; (void)time; (void)axis; (void)value;
+}
+
+static const struct wl_pointer_listener pointer_listener = {
+    .enter  = pointer_enter,
+    .leave  = pointer_leave,
+    .motion = pointer_motion,
+    .button = pointer_button,
+    .axis   = pointer_axis,
+};
+
 /* ── registry listener ────────────────────────────────────────────────────── */
 
 static void registry_global(void *data, struct wl_registry *registry,
@@ -260,6 +322,10 @@ bool wleyes_init(struct wleyes_state *state) {
         wleyes_destroy(state);
         return false;
     }
+
+    /* Set up pointer tracking */
+    state->pointer = wl_seat_get_pointer(state->seat);
+    wl_pointer_add_listener(state->pointer, &pointer_listener, state);
 
     state->running = true;
     return true;

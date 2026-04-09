@@ -2,10 +2,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 
 #include "wayland.h"
 
 #define VERSION "0.1.0"
+
+static struct wleyes_state *g_state = NULL;
+
+static void handle_signal(int sig) {
+    (void)sig;
+    if (g_state) g_state->running = false;
+}
 
 static void print_help(const char *prog) {
     printf(
@@ -99,6 +107,10 @@ int main(int argc, char *argv[]) {
     struct wleyes_state state = {0};
     state.config = cfg;
 
+    g_state = &state;
+    signal(SIGINT,  handle_signal);
+    signal(SIGTERM, handle_signal);
+
     if (!wleyes_init(&state)) {
         fprintf(stderr, "Failed to connect to Wayland.\n");
         return EXIT_FAILURE;
@@ -117,6 +129,17 @@ int main(int argc, char *argv[]) {
     wl_display_roundtrip(state.display);
 
     printf("Screen: %dx%d\n", state.screen_width, state.screen_height);
+    printf("Tracking pointer. Press Ctrl+C to quit.\n");
+
+    while (state.running && wl_display_dispatch(state.display) != -1) {
+        if (state.needs_redraw && state.cursor_valid) {
+            printf("\rCursor: %.0f, %.0f   ", state.cursor_x, state.cursor_y);
+            fflush(stdout);
+            state.needs_redraw = false;
+        }
+    }
+
+    printf("\nShutting down.\n");
 
     wleyes_destroy(&state);
     return EXIT_SUCCESS;
