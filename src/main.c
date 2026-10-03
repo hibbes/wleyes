@@ -31,6 +31,8 @@ static void print_help(const char *prog) {
         "  --margin <x>,<y>    Offset from anchor in pixels (default: 200,4)\n"
         "  --size <w>x<h>      Widget size in pixels (default: 48x24)\n"
         "  --output <name>     Target monitor (default: first available)\n"
+        "  --blink             Blink on every mouse button press\n"
+        "  --roll              Roll the eyes when the mouse wheel turns\n"
         "  -h, --help          Show this help\n"
         "  -v, --version       Show version\n",
         prog
@@ -54,6 +56,8 @@ static struct wleyes_config parse_args(int argc, char *argv[]) {
         .width       = 48,
         .height      = 24,
         .output_name = NULL,
+        .blink       = false,
+        .roll        = false,
     };
 
     for (int i = 1; i < argc; i++) {
@@ -77,6 +81,10 @@ static struct wleyes_config parse_args(int argc, char *argv[]) {
             }
         } else if (strcmp(argv[i], "--output") == 0 && i + 1 < argc) {
             cfg.output_name = argv[++i];
+        } else if (strcmp(argv[i], "--blink") == 0) {
+            cfg.blink = true;
+        } else if (strcmp(argv[i], "--roll") == 0) {
+            cfg.roll = true;
         } else {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             print_help(argv[0]);
@@ -147,6 +155,7 @@ int main(int argc, char *argv[]) {
         wl_display_flush(state.display);
         poll(fds, 2, 5);
 
+        state.now_ms = time_ms();
         wleyes_process_libinput(&state);
 
         if (fds[0].revents & POLLIN) {
@@ -161,6 +170,11 @@ int main(int argc, char *argv[]) {
         }
 
         long now = time_ms();
+        state.now_ms = now;
+        /* Keep drawing frames while an animation runs, plus one final frame */
+        bool was_animating = state.blink_start || state.roll_start;
+        if (wleyes_animating(&state) || was_animating)
+            state.needs_redraw = true;
         if (state.needs_redraw && (now - last_render) >= FRAME_INTERVAL_MS) {
             wleyes_render(&state);
             wl_surface_attach(state.eyes_surface,

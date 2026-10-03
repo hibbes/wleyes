@@ -517,6 +517,24 @@ void wleyes_process_libinput(struct wleyes_state *state) {
             state->cursor_y = libinput_event_pointer_get_absolute_y_transformed(
                 p, state->screen_height);
             state->needs_redraw = true;
+        } else if (type == LIBINPUT_EVENT_POINTER_BUTTON && state->config.blink) {
+            struct libinput_event_pointer *p = libinput_event_get_pointer_event(ev);
+            if (libinput_event_pointer_get_button_state(p) == LIBINPUT_BUTTON_STATE_PRESSED) {
+                state->blink_start = state->now_ms;
+                state->needs_redraw = true;
+            }
+        } else if (type == LIBINPUT_EVENT_POINTER_SCROLL_WHEEL && state->config.roll) {
+            struct libinput_event_pointer *p = libinput_event_get_pointer_event(ev);
+            if (libinput_event_pointer_has_axis(p, LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL)) {
+                double v = libinput_event_pointer_get_scroll_value_v120(
+                    p, LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL);
+                /* Start a roll unless one is already running */
+                if (v != 0 && !state->roll_start) {
+                    state->roll_start = state->now_ms;
+                    state->roll_dir = v > 0 ? 1 : -1;
+                    state->needs_redraw = true;
+                }
+            }
         }
         libinput_event_destroy(ev);
     }

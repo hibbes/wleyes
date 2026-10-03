@@ -19,6 +19,8 @@ struct wleyes_config {
     int width;
     int height;
     const char *output_name;
+    bool blink;   /* --blink: blink on mouse button press */
+    bool roll;    /* --roll: roll eyes on mouse wheel */
 };
 
 struct wleyes_state {
@@ -51,6 +53,12 @@ struct wleyes_state {
     double cursor_y;
     bool   needs_redraw;
     bool   calibrated;
+
+    /* Animations (CLOCK_MONOTONIC ms, 0 = inactive) */
+    long   now_ms;
+    long   blink_start;
+    long   roll_start;
+    int    roll_dir;    /* +1 clockwise, -1 counter-clockwise */
 
     /* libinput */
     struct libinput *li;
