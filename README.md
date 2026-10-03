@@ -22,6 +22,15 @@ ninja -C build
 ./build/wleyes --blink --roll                       # blink on clicks, roll on scroll
 ```
 
+### Right-click menu
+
+Right-click the eyes for a small popup menu:
+
+- **Blink on click** / **Roll eyes on scroll**: toggle the two animations at runtime. The choice is saved to `~/.config/wleyes/options` (or `$XDG_CONFIG_HOME/wleyes/options`) and overrides `--blink`/`--roll` on the next start.
+- **Info**: version, author and project link.
+
+Clicking anywhere else closes the popup. Labels are German when the locale is German, English otherwise.
+
 ### Options
 
 | Option | Default | Description |
@@ -45,7 +54,8 @@ sudo ninja -C build install
 2. A temporary fullscreen transparent overlay captures the exact cursor position on first mouse movement (calibration)
 3. The eyes surface provides ongoing recalibration whenever the cursor passes over it
 4. With `--blink`/`--roll`, button and wheel events from the same libinput context start short time-based animations (blink 180 ms, roll 700 ms)
-5. **Cairo** renders classic xeyes (white sclera, black pupils) on a wlr-layer-shell overlay
+5. A right-click on the eyes opens an `xdg_popup` attached to the layer surface (`zwlr_layer_surface_v1.get_popup`) with a pointer grab, so a click elsewhere dismisses it
+6. **Cairo** renders classic xeyes (white sclera, black pupils) on a wlr-layer-shell overlay
 
 ### Requirements
 

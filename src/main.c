@@ -9,8 +9,8 @@
 
 #include "wayland.h"
 #include "render.h"
+#include "menu.h"
 
-#define VERSION "0.1.0"
 #define FRAME_INTERVAL_MS 32
 
 static struct wleyes_state *g_state = NULL;
@@ -34,7 +34,11 @@ static void print_help(const char *prog) {
         "  --blink             Blink on every mouse button press\n"
         "  --roll              Roll the eyes when the mouse wheel turns\n"
         "  -h, --help          Show this help\n"
-        "  -v, --version       Show version\n",
+        "  -v, --version       Show version\n"
+        "\n"
+        "Right-click the eyes for a menu to toggle blink/roll and show info.\n"
+        "Choices made there are saved to ~/.config/wleyes/options and override\n"
+        "the command line on the next start.\n",
         prog
     );
 }
@@ -65,7 +69,7 @@ static struct wleyes_config parse_args(int argc, char *argv[]) {
             print_help(argv[0]);
             exit(0);
         } else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
-            printf("wleyes " VERSION "\n");
+            printf("wleyes " WLEYES_VERSION "\n");
             exit(0);
         } else if (strcmp(argv[i], "--anchor") == 0 && i + 1 < argc) {
             cfg.anchor = parse_anchor(argv[++i]);
@@ -103,6 +107,7 @@ static long time_ms(void) {
 int main(int argc, char *argv[]) {
     struct wleyes_state state = {0};
     state.config = parse_args(argc, argv);
+    wleyes_options_load(&state.config);
 
     g_state = &state;
     signal(SIGINT,  handle_signal);

@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <wayland-client.h>
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
+#include "xdg-shell-client-protocol.h"
+#include <sys/types.h>
 
 enum anchor {
     ANCHOR_TOP_LEFT     = 0,
@@ -32,6 +34,8 @@ struct wleyes_state {
     struct wl_pointer    *pointer;
     struct zwlr_layer_shell_v1 *layer_shell;
     struct wl_output     *output;
+    struct xdg_wm_base   *wm_base;
+    struct wl_surface    *pointer_focus;   /* surface under the pointer */
 
     /* Eyes surface */
     struct wl_surface              *eyes_surface;
@@ -72,6 +76,17 @@ struct wleyes_state {
     int               buf_width;
     int               buf_height;
 
+    /* Right-click popup (options menu or info card) */
+    struct wl_surface   *menu_surface;
+    struct xdg_surface  *menu_xdg;
+    struct xdg_popup    *menu_popup;
+    struct wl_buffer    *menu_buffer;
+    void                *menu_data;
+    int                  menu_size;
+    int                  menu_w, menu_h;
+    int                  menu_kind;     /* enum menu_kind in menu.h */
+    int                  menu_hover;    /* item index under pointer, -1 = none */
+
     /* Config */
     struct wleyes_config config;
 
@@ -87,6 +102,7 @@ bool wleyes_setup_calibration_surface(struct wleyes_state *state);
 void wleyes_destroy_calibration_surface(struct wleyes_state *state);
 struct libinput;
 bool wleyes_open_libinput(struct wleyes_state *state);
+int  wleyes_create_shm_file(off_t size);
 void wleyes_process_libinput(struct wleyes_state *state);
 
 #endif

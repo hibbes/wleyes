@@ -11,7 +11,10 @@
 #include <libudev.h>
 #include <libinput.h>
 
+#include <linux/input-event-codes.h>
+
 #include "wayland.h"
+#include "menu.h"
 
 /* ── compute eyes screen position from anchor/margin ─────────────────────── */
 
@@ -45,8 +48,11 @@ static void pointer_enter(void *data, struct wl_pointer *pointer,
         wl_fixed_t sx, wl_fixed_t sy) {
     (void)pointer; (void)serial;
     struct wleyes_state *state = data;
+    state->pointer_focus = surface;
 
-    if (surface == state->cal_surface) {
+    if (surface == state->menu_surface) {
+        wleyes_menu_hover(state, wl_fixed_to_double(sx), wl_fixed_to_double(sy));
+    } else if (surface == state->cal_surface) {
         /* Calibration surface is fullscreen — surface coords = screen coords */
         state->cursor_x = wl_fixed_to_double(sx);
         state->cursor_y = wl_fixed_to_double(sy);
@@ -62,13 +68,22 @@ static void pointer_enter(void *data, struct wl_pointer *pointer,
 
 static void pointer_leave(void *data, struct wl_pointer *pointer,
         uint32_t serial, struct wl_surface *surface) {
-    (void)data; (void)pointer; (void)serial; (void)surface;
+    (void)pointer; (void)serial;
+    struct wleyes_state *state = data;
+    if (surface == state->menu_surface)
+        wleyes_menu_hover(state, -1, -1);
+    if (state->pointer_focus == surface)
+        state->pointer_focus = NULL;
 }
 
 static void pointer_motion(void *data, struct wl_pointer *pointer,
         uint32_t time, wl_fixed_t sx, wl_fixed_t sy) {
     (void)pointer; (void)time;
     struct wleyes_state *state = data;
+    if (state->menu_surface && state->pointer_focus == state->menu_surface) {
+        wleyes_menu_hover(state, wl_fixed_to_double(sx), wl_fixed_to_double(sy));
+        return;
+    }
     /* We don't know which surface this is for, but the coords are
      * surface-local. During calibration the cal_surface is fullscreen
      * so coords = screen coords. After calibration, only the eyes
@@ -85,8 +100,16 @@ static void pointer_motion(void *data, struct wl_pointer *pointer,
 }
 
 static void pointer_button(void *data, struct wl_pointer *p,
-        uint32_t serial, uint32_t time, uint32_t button, uint32_t state) {
-    (void)data; (void)p; (void)serial; (void)time; (void)button; (void)state;
+        uint32_t serial, uint32_t time, uint32_t button, uint32_t bstate) {
+    (void)p; (void)time;
+    struct wleyes_state *state = data;
+    if (bstate != WL_POINTER_BUTTON_STATE_PRESSED) return;
+
+    if (state->menu_surface && state->pointer_focus == state->menu_surface) {
+        if (button == BTN_LEFT) wleyes_menu_click(state, serial);
+    } else if (state->pointer_focus == state->eyes_surface && button == BTN_RIGHT) {
+        wleyes_menu_open(state, MENU_OPTIONS, serial);
+    }
 }
 
 static void pointer_axis(void *data, struct wl_pointer *p,
@@ -187,6 +210,17 @@ static const struct wl_output_listener output_listener = {
     .scale    = output_scale,
 };
 
+/* ── xdg_wm_base (needed for the right-click popup) ─────────────────────── */
+
+static void wm_base_ping(void *data, struct xdg_wm_base *wm_base, uint32_t serial) {
+    (void)data;
+    xdg_wm_base_pong(wm_base, serial);
+}
+
+static const struct xdg_wm_base_listener wm_base_listener = {
+    .ping = wm_base_ping,
+};
+
 /* ── registry listener ───────────────────────────────────────────────────── */
 
 static void registry_global(void *data, struct wl_registry *registry,
@@ -205,6 +239,9 @@ static void registry_global(void *data, struct wl_registry *registry,
     } else if (strcmp(interface, wl_seat_interface.name) == 0) {
         if (!state->seat)
             state->seat = wl_registry_bind(registry, name, &wl_seat_interface, 7);
+    } else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
+        state->wm_base = wl_registry_bind(registry, name, &xdg_wm_base_interface, 1);
+        xdg_wm_base_add_listener(state->wm_base, &wm_base_listener, state);
     } else if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
         state->layer_shell = wl_registry_bind(registry, name,
                                               &zwlr_layer_shell_v1_interface, 1);
@@ -319,7 +356,7 @@ bool wleyes_setup_surface(struct wleyes_state *state) {
 
 /* ── SHM buffer management ───────────────────────────────────────────────── */
 
-static int create_shm_file(off_t size) {
+int wleyes_create_shm_file(off_t size) {
     int fd = shm_open("/wleyes-shm", O_RDWR | O_CREAT | O_EXCL, 0600);
     if (fd < 0) {
         shm_unlink("/wleyes-shm");
@@ -340,7 +377,7 @@ bool wleyes_create_buffers(struct wleyes_state *state) {
 
     state->buffer_size = buf_size;
 
-    int fd = create_shm_file((off_t)total);
+    int fd = wleyes_create_shm_file((off_t)total);
     if (fd < 0) return false;
 
     void *data = mmap(NULL, (size_t)total, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
@@ -543,6 +580,7 @@ void wleyes_process_libinput(struct wleyes_state *state) {
 /* ── cleanup ─────────────────────────────────────────────────────────────── */
 
 void wleyes_destroy(struct wleyes_state *state) {
+    wleyes_menu_close(state);
     if (state->li) { libinput_unref(state->li); state->li = NULL; }
 
     if (state->buffers[0]) { wl_buffer_destroy(state->buffers[0]); state->buffers[0] = NULL; }
@@ -558,6 +596,7 @@ void wleyes_destroy(struct wleyes_state *state) {
     if (state->pointer)     { wl_pointer_destroy(state->pointer); }
     if (state->seat)        { wl_seat_destroy(state->seat); }
     if (state->layer_shell) { zwlr_layer_shell_v1_destroy(state->layer_shell); }
+    if (state->wm_base)     { xdg_wm_base_destroy(state->wm_base); }
     if (state->output)      { wl_output_destroy(state->output); }
     if (state->shm)         { wl_shm_destroy(state->shm); }
     if (state->compositor)  { wl_compositor_destroy(state->compositor); }
