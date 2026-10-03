@@ -43,11 +43,11 @@ struct strings {
 
 static const struct strings str_en = {
     "Blink on click", "Roll eyes on scroll", "Info",
-    "Wayland-native xeyes", "MIT License",
+    "Eyes that follow your cursor", "MIT License",
 };
 static const struct strings str_de = {
     "Blinzeln bei Klick", "Augen rollen am Mausrad", "Info",
-    "xeyes für Wayland", "MIT-Lizenz",
+    "Augen, die der Maus folgen", "MIT-Lizenz",
 };
 
 static const struct strings *strings(void) {
