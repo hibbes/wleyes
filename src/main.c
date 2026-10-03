@@ -133,11 +133,18 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* Fullscreen calibration surface — catches first mouse movement */
     state.calibrated = false;
     state.cursor_x = state.eyes_screen_x + state.config.width / 2.0;
     state.cursor_y = state.eyes_screen_y + state.config.height / 2.0;
-    wleyes_setup_calibration_surface(&state);
+
+    /* Preferred: the compositor tells us the exact cursor position.
+     * Fallback: libinput deltas, calibrated by a fullscreen surface that
+     * catches the first mouse movement. */
+    if (wleyes_setup_cursor_session(&state)) {
+        state.calibrated = true;
+    } else {
+        wleyes_setup_calibration_surface(&state);
+    }
 
     /* Initial render (pupils centered — cursor is at eye center) */
     wleyes_render(&state);

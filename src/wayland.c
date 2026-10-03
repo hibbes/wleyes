@@ -200,7 +200,9 @@ static void output_done(void *data, struct wl_output *output) {
 }
 
 static void output_scale(void *data, struct wl_output *output, int32_t factor) {
-    (void)data; (void)output; (void)factor;
+    (void)output;
+    struct wleyes_state *state = data;
+    if (factor > 0) state->output_scale = factor;
 }
 
 static const struct wl_output_listener output_listener = {
@@ -239,6 +241,12 @@ static void registry_global(void *data, struct wl_registry *registry,
     } else if (strcmp(interface, wl_seat_interface.name) == 0) {
         if (!state->seat)
             state->seat = wl_registry_bind(registry, name, &wl_seat_interface, 7);
+    } else if (strcmp(interface, ext_output_image_capture_source_manager_v1_interface.name) == 0) {
+        state->capture_source_mgr = wl_registry_bind(registry, name,
+            &ext_output_image_capture_source_manager_v1_interface, 1);
+    } else if (strcmp(interface, ext_image_copy_capture_manager_v1_interface.name) == 0) {
+        state->copy_capture_mgr = wl_registry_bind(registry, name,
+            &ext_image_copy_capture_manager_v1_interface, 1);
     } else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
         state->wm_base = wl_registry_bind(registry, name, &xdg_wm_base_interface, 1);
         xdg_wm_base_add_listener(state->wm_base, &wm_base_listener, state);
@@ -475,6 +483,58 @@ void wleyes_destroy_calibration_surface(struct wleyes_state *state) {
     wl_display_roundtrip(state->display);
 }
 
+/* ── exact cursor position (ext-image-copy-capture cursor session) ───────── */
+
+/* The compositor reports the cursor hotspot on every move, in buffer pixels of
+ * the captured output. Libinput deltas drift whenever the compositor moves or
+ * holds the pointer itself (VT switch, pointer lock, warps), this does not. */
+
+static void cursor_enter(void *data, struct ext_image_copy_capture_cursor_session_v1 *s) {
+    (void)data; (void)s;
+}
+
+static void cursor_leave(void *data, struct ext_image_copy_capture_cursor_session_v1 *s) {
+    (void)data; (void)s;
+}
+
+static void cursor_position(void *data, struct ext_image_copy_capture_cursor_session_v1 *s,
+        int32_t x, int32_t y) {
+    (void)s;
+    struct wleyes_state *state = data;
+    int scale = state->output_scale > 0 ? state->output_scale : 1;
+    state->cursor_x = (double)x / scale;
+    state->cursor_y = (double)y / scale;
+    state->cursor_exact = true;
+    state->calibrated = true;
+    state->needs_redraw = true;
+}
+
+static void cursor_hotspot(void *data, struct ext_image_copy_capture_cursor_session_v1 *s,
+        int32_t x, int32_t y) {
+    (void)data; (void)s; (void)x; (void)y;
+}
+
+static const struct ext_image_copy_capture_cursor_session_v1_listener cursor_session_listener = {
+    .enter    = cursor_enter,
+    .leave    = cursor_leave,
+    .position = cursor_position,
+    .hotspot  = cursor_hotspot,
+};
+
+bool wleyes_setup_cursor_session(struct wleyes_state *state) {
+    if (!state->capture_source_mgr || !state->copy_capture_mgr ||
+        !state->pointer || !state->output)
+        return false;
+    state->capture_source = ext_output_image_capture_source_manager_v1_create_source(
+        state->capture_source_mgr, state->output);
+    state->cursor_session = ext_image_copy_capture_manager_v1_create_pointer_cursor_session(
+        state->copy_capture_mgr, state->capture_source, state->pointer);
+    ext_image_copy_capture_cursor_session_v1_add_listener(
+        state->cursor_session, &cursor_session_listener, state);
+    wl_display_roundtrip(state->display);
+    return true;
+}
+
 /* ── libinput ─────────────────────────────────────────────────────────────── */
 
 static int open_restricted(const char *path, int flags, void *user_data) {
@@ -531,7 +591,7 @@ void wleyes_process_libinput(struct wleyes_state *state) {
     struct libinput_event *ev;
     while ((ev = libinput_get_event(state->li)) != NULL) {
         enum libinput_event_type type = libinput_event_get_type(ev);
-        if (type == LIBINPUT_EVENT_POINTER_MOTION) {
+        if (type == LIBINPUT_EVENT_POINTER_MOTION && !state->cursor_exact) {
             struct libinput_event_pointer *p = libinput_event_get_pointer_event(ev);
             double dx = libinput_event_pointer_get_dx(p);
             double dy = libinput_event_pointer_get_dy(p);
@@ -547,7 +607,7 @@ void wleyes_process_libinput(struct wleyes_state *state) {
                 state->cursor_y = state->screen_height - 1;
 
             state->needs_redraw = true;
-        } else if (type == LIBINPUT_EVENT_POINTER_MOTION_ABSOLUTE) {
+        } else if (type == LIBINPUT_EVENT_POINTER_MOTION_ABSOLUTE && !state->cursor_exact) {
             struct libinput_event_pointer *p = libinput_event_get_pointer_event(ev);
             state->cursor_x = libinput_event_pointer_get_absolute_x_transformed(
                 p, state->screen_width);
@@ -581,6 +641,10 @@ void wleyes_process_libinput(struct wleyes_state *state) {
 
 void wleyes_destroy(struct wleyes_state *state) {
     wleyes_menu_close(state);
+    if (state->cursor_session) ext_image_copy_capture_cursor_session_v1_destroy(state->cursor_session);
+    if (state->capture_source) ext_image_capture_source_v1_destroy(state->capture_source);
+    if (state->copy_capture_mgr) ext_image_copy_capture_manager_v1_destroy(state->copy_capture_mgr);
+    if (state->capture_source_mgr) ext_output_image_capture_source_manager_v1_destroy(state->capture_source_mgr);
     if (state->li) { libinput_unref(state->li); state->li = NULL; }
 
     if (state->buffers[0]) { wl_buffer_destroy(state->buffers[0]); state->buffers[0] = NULL; }

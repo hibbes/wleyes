@@ -1,5 +1,5 @@
 project('wleyes', 'c',
-  version: '0.2.0',
+  version: '0.3.0',
   default_options: ['c_std=c11', 'warning_level=2'],
 )
 
@@ -47,6 +47,28 @@ xdg_shell_code = custom_target('xdg-shell-code',
   command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'],
 )
 
+# Exact cursor position from the compositor (ext-image-copy-capture cursor
+# session). Optional at runtime: used when the compositor offers it.
+staging = wayland_protos.get_variable('pkgdatadir') / 'staging'
+extra_protocols = []
+foreach proto : [
+    # referenced by ext-image-capture-source (toplevel sources), not used directly
+    ['ext-foreign-toplevel-list', staging / 'ext-foreign-toplevel-list/ext-foreign-toplevel-list-v1.xml'],
+    ['ext-image-capture-source', staging / 'ext-image-capture-source/ext-image-capture-source-v1.xml'],
+    ['ext-image-copy-capture',   staging / 'ext-image-copy-capture/ext-image-copy-capture-v1.xml'],
+  ]
+  extra_protocols += custom_target(proto[0] + '-client-header',
+    input: proto[1],
+    output: proto[0] + '-v1-client-protocol.h',
+    command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@'],
+  )
+  extra_protocols += custom_target(proto[0] + '-code',
+    input: proto[1],
+    output: proto[0] + '-v1-protocol.c',
+    command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'],
+  )
+endforeach
+
 executable('wleyes',
   'src/main.c',
   'src/wayland.c',
@@ -56,6 +78,7 @@ executable('wleyes',
   layer_shell_code,
   xdg_shell_client_h,
   xdg_shell_code,
+  extra_protocols,
   dependencies: [wayland_client, cairo, math_lib, rt_lib, libinput, libudev],
   install: true,
 )

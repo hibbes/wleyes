@@ -5,6 +5,8 @@
 #include <wayland-client.h>
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
+#include "ext-image-capture-source-v1-client-protocol.h"
+#include "ext-image-copy-capture-v1-client-protocol.h"
 #include <sys/types.h>
 
 enum anchor {
@@ -36,6 +38,14 @@ struct wleyes_state {
     struct wl_output     *output;
     struct xdg_wm_base   *wm_base;
     struct wl_surface    *pointer_focus;   /* surface under the pointer */
+    int                   output_scale;
+
+    /* Exact cursor position from the compositor, if offered */
+    struct ext_output_image_capture_source_manager_v1 *capture_source_mgr;
+    struct ext_image_copy_capture_manager_v1          *copy_capture_mgr;
+    struct ext_image_capture_source_v1                *capture_source;
+    struct ext_image_copy_capture_cursor_session_v1   *cursor_session;
+    bool cursor_exact;     /* session active: libinput motion is ignored */
 
     /* Eyes surface */
     struct wl_surface              *eyes_surface;
@@ -100,6 +110,8 @@ bool wleyes_setup_surface(struct wleyes_state *state);
 bool wleyes_create_buffers(struct wleyes_state *state);
 bool wleyes_setup_calibration_surface(struct wleyes_state *state);
 void wleyes_destroy_calibration_surface(struct wleyes_state *state);
+/* Track the real cursor via ext-image-copy-capture; false if unsupported. */
+bool wleyes_setup_cursor_session(struct wleyes_state *state);
 struct libinput;
 bool wleyes_open_libinput(struct wleyes_state *state);
 int  wleyes_create_shm_file(off_t size);
